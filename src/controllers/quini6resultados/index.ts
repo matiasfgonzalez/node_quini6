@@ -1,5 +1,6 @@
 import express from 'express';
 import * as cheerio from 'cheerio';
+import * as _ from 'lodash';
 import { Sorteo } from '../../interfaces/Sorteo';
 import { ResultadoSorteo } from '../../interfaces/ResultadosSorteo';
 import { Numero, TodosLosNumeros } from '../../interfaces/TodosLosNumeros';
@@ -10,7 +11,21 @@ const router = express.Router();
 const obtenerListaSorteos = async () : Promise<Sorteo[]> => {
   const url2Get = 'https://www.quini-6-resultados.com.ar/quini6/sorteos-anteriores.aspx';
   try {
-    const response = await axios.get(url2Get);
+    const response = await axios.get(url2Get, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'es-419,es;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+      },
+    });
     const $ = cheerio.load(response.data);
     const resp: Sorteo[] = [];
     $('div.col-md-3 p a').each((i, el) => {
@@ -58,7 +73,21 @@ const obtenerResultadoSorteo = async (nroSorteo: number) : Promise<ResultadoSort
 
     try {
 
-      const response = await axios.get(url2Get);
+      const response = await axios.get(url2Get, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'es-419,es;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Cache-Control': 'max-age=0',
+        },
+      });
       const $ = cheerio.load(response.data);
       
       // 1 SORTEO TRADICIONAL
@@ -297,6 +326,64 @@ router.get('/todoslosnumeros', async (req, res) => {
 
   } catch (error) {
     return res.status(400).json({ message: error });
+  }  
+});
+
+router.get('/controlar/:numeros', async (req, res) => {
+  if (req.params.numeros !== undefined) {
+    try {
+      // 1. Parsear numeros del usuario
+      const jugada = req.params.numeros.split('-').map(n => parseInt(n));
+      if (jugada.length !== 6) {
+        return res.status(400).json({ message: 'Debe enviar exactamente 6 números separados por guiones (ej: 01-02-03-04-05-06)' });
+      }
+
+      // 2. Obtener ultimo sorteo
+      const listaSorteos = await obtenerListaSorteos();
+      // Ordenar descendente para tener el mas reciente primero
+      listaSorteos.sort((a, b) => parseInt(b.numero) - parseInt(a.numero));
+      const ultimoSorteoHeader = listaSorteos[0];
+      
+      const ultimoSorteo = await obtenerResultadoSorteo(parseInt(ultimoSorteoHeader.numero));
+
+      // 3. Comparar
+      const reporte: any = {
+        sorteo: {
+          numero: ultimoSorteoHeader.numero,
+          fecha: ultimoSorteoHeader.fecha,
+        },
+        jugadaUsuario: jugada,
+        resultados: []
+      };
+
+      ultimoSorteo.resultados.forEach (juego => {
+        // Ignorar Pozo Extra y otros que no sean arrays de numeros
+        if(juego.titulo === 'POZO EXTRA') return;
+        
+        // Convertir string de numeros sorteados a array de ints
+        // "01,05,12..." -> [1, 5, 12...]
+        const numerosSorteados = juego.numeros
+          .split(',')
+          .map(n => parseInt(n))
+          .filter(n => !isNaN(n));
+
+        if(numerosSorteados.length > 0) {
+          const aciertos = _.intersection(jugada, numerosSorteados);
+          reporte.resultados.push({
+            modalidad: juego.titulo,
+            aciertosCantidad: aciertos.length,
+            aciertosNumeros: aciertos,
+            numerosSorteados: numerosSorteados
+          });
+        }
+      });
+
+      return res.status(200).json({ message: 'Jugada controlada exitosamente', data: reporte });
+    } catch (error) {
+      return res.status(400).json({ message: error });
+    }
+  } else {
+    return res.status(500).json({ status: 500, message: 'Debe enviar el parametro numeros' });
   }  
 });
 
